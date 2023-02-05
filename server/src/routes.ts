@@ -12,28 +12,6 @@ export async function routes(app: FastifyInstance) {
                 weekDays: true
             }
         });
-    })
-
-    app.post('/habits', async (request) => {
-        const createHabitBody = z.object({
-            title: z.string(),
-            weekDays: z.array(z.number().min(0).max(6))
-        });
-
-        const { title, weekDays } = createHabitBody.parse(request.body);
-        const today = dayjs().startOf('day').toDate();
-
-        await prisma.habit.create({
-            data: {
-                title,
-                created_at: today,
-                weekDays: {
-                    create: weekDays.map(weekDay => ({
-                        week_day: weekDay
-                    }))
-                }
-            }
-        })
     });
 
     app.get('/day', async (request) => {
@@ -74,7 +52,7 @@ export async function routes(app: FastifyInstance) {
             ...habit,
             completed: completedHabits?.includes(habit.id) || false
         }));
-    })
+    });
     
     app.patch('/habits/:id/toggle', async (request) => {
         const toggleHabitParams = z.object({
