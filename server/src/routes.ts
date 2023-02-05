@@ -5,6 +5,15 @@ import { prisma } from './lib/prisma';
 import { z } from 'zod';
 
 export async function routes(app: FastifyInstance) {
+    app.get('/habits', async () => {
+        return await prisma.habit.findMany({
+            include: {
+                dayHabits: true,
+                weekDays: true
+            }
+        });
+    })
+
     app.post('/habits', async (request) => {
         const createHabitBody = z.object({
             title: z.string(),
@@ -37,7 +46,7 @@ export async function routes(app: FastifyInstance) {
         const parsedDate = dayjs(date).startOf('day');
         const weekDay = parsedDate.day();
 
-        const habits = await prisma.habit.findMany({
+        const possibleHabits = await prisma.habit.findMany({
             where: {
                 created_at: {
                     lte: date,
@@ -61,7 +70,7 @@ export async function routes(app: FastifyInstance) {
 
         const completedHabits = day?.dayHabits.map(dayHabit => dayHabit.habit_id);
 
-        return habits.map(habit => ({
+        return possibleHabits.map(habit => ({
             ...habit,
             completed: completedHabits?.includes(habit.id) || false
         }));
@@ -115,5 +124,31 @@ export async function routes(app: FastifyInstance) {
                 habit_id: id
             }
         });
+    });
+
+    app.get('/summary', async () => {
+        const summary = await prisma.$queryRaw`
+            SELECT
+                D.id,
+                D.date,
+                (
+                    SELECT
+                        CAST(COUNT(*) AS FLOAT)
+                    FROM day_habits AS DH
+                    WHERE DH.day_id = D.id
+                ) AS completed,
+                (
+                    SELECT
+                        CAST(COUNT(*) AS FLOAT)
+                    FROM habit_weekdays AS HWD
+                    JOIN habits AS H ON H.id = HWD.habit_id
+                    WHERE
+                        HWD.week_day = CAST(STRFTIME('%w', D.date / 1000, 'unixepoch') AS int)
+                        AND H.created_at <= D.date
+                ) AS amount
+            FROM days AS D
+        `
+
+        return summary
     });
 }

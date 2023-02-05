@@ -1,86 +1,161 @@
 import { PrismaClient } from '@prisma/client'
-import dayjs from 'dayjs';
 import { v4 as uuidv4 } from 'uuid';
+import dayjs from 'dayjs';
 
 const prisma = new PrismaClient()
-const today = dayjs().startOf('day');
 
-const firstHabitId = uuidv4()
-const firstHabitCreationDate = today.toDate();
+function generateDatesFromYearBeginning(): Date[] {
+  const today = new Date()
 
-const secondHabitId = uuidv4()
-const secondHabitCreationDate = today.add(1, 'day').toDate();
+  let dayOfTheYear = dayjs().startOf('year');
 
-const thirdHabitId = uuidv4()
-const thirdHabitCreationDate = today.subtract(1, 'day').toDate();
+  const dates = [];
+
+  while (dayOfTheYear.isBefore(today)) {
+    dates.push(dayOfTheYear.toDate())
+    dayOfTheYear = dayOfTheYear.add(1, 'day');
+  }
+
+  return dates;
+}
+
+function generateNumberFromInterval(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1) + min);
+}
+
+function randomElements(elements: Array<any>): Array<any> {
+  const random = [];
+
+  for (let element of elements) {
+    if (generateNumberFromInterval(0, 100) <= 45) {
+      random.push(element);
+    }
+  }
+
+  return random;
+}
+
+const AVAILABLE_HABITS = [
+  'Almoçar',
+  'Beber 2L de água',
+  'Passear com o cachorro',
+  'Transar',
+  'Jogar'
+];
+
+const AVAILABLE_WEEK_DAYS = [
+  0, 1, 2, 3, 4, 5, 6
+];
+
+const FIRST_DAY_OF_YEAR = dayjs().startOf('year').toDate();
+
+type Habits = Array<{
+  id: string,
+  title: string | number,
+  created_at: Date,
+  weekDays: Array<string | number>,
+  days: Array<string>
+}>;
 
 async function run() {
-  await prisma.habitWeekDay.deleteMany()
-  await prisma.dayHabit.deleteMany()
-  await prisma.habit.deleteMany()
-  await prisma.day.deleteMany()
+  await prisma.$queryRaw`
+    PRAGMA foreign_keys = 0;
+  `;
 
-  /**
-   * Create habits
-   */
   await Promise.all([
-    prisma.habit.create({
-      data: {
-        id: firstHabitId,
-        title: 'Beber 2L água',
-        created_at: firstHabitCreationDate,
-        weekDays: {
-          create: [
-            { week_day: 1 },
-            { week_day: 2 },
-            { week_day: 3 },
-            { week_day: 4 }
-          ]
-        }
-      }
-    }),
+    prisma.day.deleteMany(),
+    prisma.habit.deleteMany(),
+    prisma.habitWeekDay.deleteMany(),
+    prisma.dayHabit.deleteMany()
+  ])
 
-    prisma.habit.create({
-      data: {
-        id: secondHabitId,
-        title: 'Exercitar 30m',
-        created_at: secondHabitCreationDate,
-        weekDays: {
-          create: [
-            { week_day: 3 },
-            { week_day: 4 },
-            { week_day: 5 },
-          ]
-        }
-      }
-    }),
+  await prisma.$queryRaw`
+    PRAGMA foreign_keys = 1;
+  `;
 
-    prisma.habit.create({
+  const dates = generateDatesFromYearBeginning().map(date => dayjs(date).toDate());
+  const habits: Habits = [];
+
+  let days: Array<string> = [];
+
+  for (let title of AVAILABLE_HABITS) {
+    const randomWeekDays = randomElements(AVAILABLE_WEEK_DAYS);
+    const randomDays = dates.filter(d => randomWeekDays.includes(dayjs(d).day())).map(d => d.toISOString());
+
+    habits.push({
+      id: uuidv4(),
+      title,
+      created_at: FIRST_DAY_OF_YEAR,
+      weekDays: randomWeekDays,
+      days: randomDays
+    })
+
+    days = [...new Set([...days, ...randomDays])];
+  }
+
+  for (let habit of habits) {
+    await prisma.habit.create({
       data: {
-        id: thirdHabitId,
-        title: 'Dormir 8h',
-        created_at: thirdHabitCreationDate,
+        id: habit.id,
+        title: habit.title.toString(),
+        created_at: habit.created_at,
         weekDays: {
-          create: [
-            { week_day: 1 },
-            { week_day: 2 },
-            { week_day: 3 },
-            { week_day: 4 },
-            { week_day: 5 },
-          ]
+          create: habit.weekDays.map(weekDay => ({ week_day: Number(weekDay) }))
         }
       }
     })
-  ])
+  }
 
+  for (let date of dates) {
+    const randomHabits = randomElements(AVAILABLE_HABITS);
+    const randomWeekDays = randomElements(AVAILABLE_WEEK_DAYS);
+    const randomDays = dates.filter(d => randomWeekDays.includes(dayjs(d).day()))
+      .map(d => d.toISOString());
+
+    days = [...new Set([...days, ...randomDays])];
+  }
+
+  for (let date of days) {
+    const possibleHabits = await prisma.habit.findMany({
+      where: {
+        created_at: {
+          lte: date,
+        },
+        weekDays: {
+          some: {
+            week_day: dayjs(date).startOf('day').day(),
+          }
+        }
+      }
+    });
+
+    const randomPossibleHabits = randomElements(possibleHabits);
+
+    await prisma.day.create({
+      data: {
+        date: new Date(date),
+        dayHabits: {
+          create: randomPossibleHabits.map(habit => ({ habit_id: habit.id }))
+        }
+      }
+    })
+  }
+
+  /*
   await Promise.all([
-    /**
-     * Habits (Complete/Available): 1/1
-     */
     prisma.day.create({
       data: {
-        /** Today */
-        date: today.toDate(),
+        date: new Date('2023-01-02T03:00:00.000z'),
+        dayHabits: {
+          create: {
+            habit_id: firstHabitId,
+          }
+        }
+      }
+    }),
+    prisma.day.create({
+      data: {
+        date: new Date('2023-01-06T03:00:00.000z'),
         dayHabits: {
           create: {
             habit_id: firstHabitId,
@@ -89,28 +164,9 @@ async function run() {
       }
     }),
 
-    /**
-     * Habits (Complete/Available): 1/1
-     */
     prisma.day.create({
       data: {
-        /** Friday */
-        date: today.add(1, 'day').toDate(),
-        dayHabits: {
-          create: {
-            habit_id: firstHabitId,
-          }
-        }
-      }
-    }),
-
-    /**
-     * Habits (Complete/Available): 2/2
-     */
-    prisma.day.create({
-      data: {
-        /** Wednesday */
-        date: today.subtract(1, 'day').toDate(),
+        date: new Date('2023-01-04T03:00:00.000z'),
         dayHabits: {
           create: [
             { habit_id: firstHabitId },
@@ -119,7 +175,7 @@ async function run() {
         }
       }
     }),
-  ])
+  ]) */
 }
 
 run()
